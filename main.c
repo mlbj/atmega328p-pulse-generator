@@ -77,18 +77,17 @@ ISR(TIMER1_COMPA_vect){
         PORTD &= ~(1 << OUTPUT_PIN);
         PORTB &= ~(1 << LED_PIN);
         
+        // Single mode
+        if (cfg.mode == 0){
+            cfg.running = 0;
+
+            // Stop timer
+            TCCR1B &= ~((1 << CS12) | (1 << CS10));
         
-        // Continuous mode
-        if (cfg.mode == 2){
-            static uint16_t cycle_count = 0;
-            if (++cycle_count >= (cfg.period/cfg.duration)){
-                cycle_count = 0;
-                start_pulse();
-            }
-        // Multi mode
-        }else if(cfg.mode == 1){
-            // At least one more pulse in Multi mode
-            if (++pulse_counter < cfg.count){
+        // Either Continuous or Multi mode
+        }else{
+            // Prepare the next pulse
+            if ((++pulse_counter < cfg.count && cfg.mode == 1) || (cfg.mode == 2)){
                 // Calculate OFF time
                 uint16_t off_time = cfg.period - cfg.duration;
 
@@ -110,14 +109,8 @@ ISR(TIMER1_COMPA_vect){
                 // Stop timer
                 TCCR1B &= ~((1 << CS12) | (1 << CS10)); 
             }
-        // Single mode
-        }else{
-            cfg.running = 0;
-        
-            // Stop timer
-            TCCR1B &= ~((1 << CS12) | (1 << CS10)); 
         }
-    // Start a new pulse in Multi mode
+    // Start a new pulse in Multi or Continuous modes
     }else{
         start_pulse();
         in_pulse = 1;
