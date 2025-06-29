@@ -15,6 +15,7 @@ typedef struct{
     volatile uint32_t period;
     volatile uint16_t pulse_counter;
     volatile uint8_t required_pulses;
+    volatile uint16_t required_overflows;
     volatile uint8_t pending;
     volatile uint8_t running;
     volatile uint8_t in_pulse;
@@ -26,6 +27,7 @@ volatile pulse_config cfg = {
     .period = 1000,
     .pulse_counter = 0,
     .required_pulses = 3,
+    .required_overflows = 0,
     .pending = 0,
     .running = 0,
     .in_pulse = 0,
@@ -42,7 +44,7 @@ void setup_timer1(void) {
     TCCR1B = (1 << WGM12); 
     
     // Enables compare match and overflow interrupts
-    TIMSK1 = (1 << OCIE1A); // |  (1 << TOIE1);
+    TIMSK1 = (1 << OCIE1A); // | (1 << TOIE1);
 }
 
 void setup_serial(){
@@ -57,14 +59,17 @@ void start_pulse(){
     PORTD |= (1 << OUTPUT_PIN);
     PORTB |= (1 << LED_PIN);
     
+    // Compute the number of ticks needed 
+    uint32_t total_ticks = (F_CPU/1000)*cfg.duration/PRESCALER_VALUE; // - 1;
+    cfg.required_overflows = total_ticks/(MAX_16BIT + 1);
+    uint16_t remaining_ticks = total_ticks % (MAX_16BIT + 1);
+
     // Reset timer
     TCNT1 = 0;
-    
-    // Compute the number of ticks needed 
-    uint32_t ticks = (F_CPU/1000)*cfg.duration/PRESCALER_VALUE - 1;
 
-    // Set the Timer1 match value
-    OCR1A = ticks > MAX_16BIT ? MAX_16BIT : ticks;
+    // Set the Timer1 match value of the first segment
+    //OCR1A = ticks > MAX_16BIT ? MAX_16BIT : ticks;
+    OCR1A = remaining_ticks > 0 ? remaining_ticks - 1 : MAX_16BIT;
 
     // Restart Timer1 
     TCCR1B |=  (1 << CS12) | (1 << CS10);
@@ -86,19 +91,32 @@ void end_pulse(void){
 }
 
 void start_offtime(void){
-    // Reset Timer1
-    TCNT1 = 0;
-            
     // Compute the number of ticks needed
     uint32_t off_time = cfg.period - cfg.duration;
-    uint32_t ticks = (F_CPU/1000)*off_time/PRESCALER_VALUE - 1;
+    uint32_t total_ticks = (F_CPU/1000)*off_time/PRESCALER_VALUE; // - 1;
+    cfg.required_overflows = total_ticks/(MAX_16BIT + 1);
+    uint16_t remaining_ticks = total_ticks % (MAX_16BIT + 1);
+
+    // Reset Timer1
+    TCNT1 = 0;
 
     // Set Timer1
-    OCR1A = ticks > MAX_16BIT ? MAX_16BIT : ticks;
+    //OCR1A = ticks > MAX_16BIT ? MAX_16BIT : ticks;
+    OCR1A = remaining_ticks > 0 ? remaining_ticks - 1 : MAX_16BIT;
 
     // Restart Timer1 
     TCCR1B |=  (1 << CS12) | (1 << CS10);
+}
 
+void wait_overflow(void){
+    // Reset Timer1
+    TCNT1 = 0;
+
+    // Set Timer1 
+    OCR1A = MAX_16BIT;
+
+    // Restart Timer1 
+    TCCR1B |=  (1 << CS12) | (1 << CS10);
 }
 
 void end_offtime(void){
@@ -112,27 +130,43 @@ void end_offtime(void){
 
 ISR(TIMER1_COMPA_vect){
     if (cfg.in_pulse){
-        // Do stuff related to ending a pulse
-        end_pulse();
+        if (cfg.required_overflows == 0){
+            // Do stuff related to ending a pulse
+            end_pulse();
 
-        // Prepare next off time
-        start_offtime();
-    }else{
-        // Do stuff related to ending an off time
-        end_offtime();
-
-        // Prepare next pulse
-        if ((cfg.pulse_counter < cfg.required_pulses && cfg.mode == 1) || (cfg.mode == 2)){
-            start_pulse();
-            cfg.running = 1;
-        
-        // It was the last off time. End it
+            // Prepare next off time
+            start_offtime();
         }else{
-            // Stop timer
-            //TCCR1B &= ~((1 << CS12) | (1 << CS10));
+            // Decrement the number of required overflows
+            cfg.required_overflows--;
+        
+            // Wait an overflow
+            wait_overflow();
+        }
+    }else{
+        if (cfg.required_overflows == 0){
+            // Do stuff related to ending an off time
+            end_offtime();
 
-            cfg.running = 0;
-            cfg.pulse_counter = 0;
+            // Prepare next pulse
+            if ((cfg.pulse_counter < cfg.required_pulses && cfg.mode == 1) || (cfg.mode == 2)){
+                start_pulse();
+                cfg.running = 1;
+        
+            // It was the last off time. End it
+            }else{
+                // Stop timer
+                //TCCR1B &= ~((1 << CS12) | (1 << CS10));
+
+                cfg.running = 0;
+                cfg.pulse_counter = 0;
+            }
+        }else{
+            // Decrement the number of required overflows
+            cfg.required_overflows--;
+
+            // Wait an overflow
+            wait_overflow();
         }
     } 
 }

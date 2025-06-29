@@ -46,7 +46,16 @@ echo "m2\n" > /dev/ttyUSB0
 |--------------|-----------------------|-----------------|
 | `t`          | Trigger               | -               |
 | `m`          | Change operation mode | 1 (Single pulse), 2 (Multi-pulse burst), 3 (Continuous) |
-| `d<param>`   | Pulse width (ms)      | 1 - 65535       |
-| `p<param>`   | Total period (ms)     | `d` - 65535     |
+| `d<param>`   | Pulse width (ms)      | 1 - 274862178   |
+| `p<param>`   | Total period (ms)     | `d` - 274862178 |
 | `c<param>`   | Pulse Count (mode 1)  | 1 - 255         |
-| `s`          | Stop                  | -               | 
+| `s`          | Stop                  | -               |
+
+
+#### Pulse duration and period
+
+This uses Timer1 to count both pulse duration and pulse period. The timer can count up to $2^16 = 65535$ 
+ticks, with each tick lasting $1024/16\ M\text{Hz} = 64\ \mu\text{s}$. This gives a maximum single-segment 
+duration of $65535 \times 64\ \mu\text{s} \approx 4.194\ \text{s}$. For longer pulse duration/periods, we chain 
+multiple overflows. The total time becomes $(\texttt{required_overflows} + 1) \times 4.194\ \text{s}\right)$. 
+Using full `32-bit` math, the theoretical maximum period is approximately $274862178\ \text{ms} \approx 76.35\ \text{h}$.
